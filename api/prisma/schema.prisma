@@ -1,0 +1,116 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+  users     User[]
+  projects  Project[]
+}
+
+model User {
+  id             String       @id @default(uuid())
+  email          String       @unique
+  passwordHash   String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  createdAt      DateTime     @default(now())
+}
+
+model Project {
+  id             String       @id @default(uuid())
+  name           String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  createdAt      DateTime     @default(now())
+  queues         Queue[]
+}
+
+model Queue {
+  id               String   @id @default(uuid())
+  projectId        String
+  project          Project  @relation(fields: [projectId], references: [id])
+  name             String
+  priority         Int      @default(0)
+  concurrencyLimit Int      @default(5)
+  isPaused         Boolean  @default(false)
+  retryPolicyId    String?
+  retryPolicy      RetryPolicy? @relation(fields: [retryPolicyId], references: [id])
+  jobs             Job[]
+  createdAt        DateTime @default(now())
+
+  @@index([projectId])
+}
+model RetryPolicy {
+  id          String  @id @default(uuid())
+  strategy    String  // FIXED | LINEAR | EXPONENTIAL
+  baseDelayMs Int     @default(1000)
+  maxRetries  Int     @default(3)
+  queues      Queue[]
+}
+
+model Job {
+  id             String    @id @default(uuid())
+  queueId        String
+  queue          Queue     @relation(fields: [queueId], references: [id])
+  type           String    // IMMEDIATE | DELAYED | SCHEDULED | RECURRING | BATCH
+  payload        Json
+  status         String    @default("QUEUED") // QUEUED | CLAIMED | RUNNING | COMPLETED | FAILED | DEAD_LETTER
+  priority       Int       @default(0)
+  runAt          DateTime  @default(now())
+  cronExpr       String?
+  batchId        String?
+  attemptCount   Int       @default(0)
+  maxAttempts    Int       @default(3)
+  claimedBy      String?
+  claimedAt      DateTime?
+  idempotencyKey String?   @unique
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  executions JobExecution[]
+  logs       JobLog[]
+
+  @@index([queueId, status, runAt])
+  @@index([status, priority])
+}
+
+model JobExecution {
+  id           String    @id @default(uuid())
+  jobId        String
+  job          Job       @relation(fields: [jobId], references: [id])
+  workerId     String
+  startedAt    DateTime  @default(now())
+  finishedAt   DateTime?
+  success      Boolean?
+  errorMessage String?
+  durationMs   Int?
+
+  @@index([jobId])
+}
+
+model JobLog {
+  id        String   @id @default(uuid())
+  jobId     String
+  job       Job      @relation(fields: [jobId], references: [id])
+  level     String   // INFO | WARN | ERROR
+  message   String
+  createdAt DateTime @default(now())
+
+  @@index([jobId])
+}
+
+model DeadLetterEntry {
+  id      String   @id @default(uuid())
+  jobId   String
+  reason  String
+  payload Json
+  movedAt DateTime @default(now())
+}
